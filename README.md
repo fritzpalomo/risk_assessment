@@ -1,6 +1,6 @@
 # PhilPEN Risk Records (Streamlit)
 
-A data-entry app for PhilPEN risk factors taken from PhilHealth Konsulta Annex 5 forms. It has 33 fields you type and 11 it calculates. Records are stored in `records.db` (SQLite), and **Export CSV** produces the file for the explainable ML dashboard.
+A data-entry app for PhilPEN risk factors taken from PhilHealth Konsulta Annex 5 forms. It has 33 fields you type and 11 it calculates. Each record gets an automatic patient code (P-0001, P-0002, ...). Records are stored in `records.db` (SQLite), and **Export CSV** produces the file for the explainable ML dashboard.
 
 Files: `app.py`, `fields.json` (the field list), `requirements.txt`.
 

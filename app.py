@@ -1,5 +1,6 @@
 """PhilPEN Risk Records: encode PhilPEN risk factors from Annex 5 forms (Streamlit)."""
 import json
+import re
 import sqlite3
 import uuid
 from datetime import datetime
@@ -44,6 +45,12 @@ def save_record(rec_id, values, encoded_at):
 def delete_record(rec_id):
     get_conn().execute("DELETE FROM records WHERE id = ?", (rec_id,))
     get_conn().commit()
+
+
+def next_patient_code(records):
+    nums = [int(m.group(1)) for r in records
+            if (m := re.fullmatch(r"P-(\d+)", str(r["values"].get("patient_code", ""))))]
+    return f"P-{max(nums, default=0) + 1:04d}"
 
 
 # ---------- calculated fields (DOH PhilPEN manual cut-offs) ----------
@@ -102,7 +109,7 @@ def clear_form():
 def load_into_form(rec):
     clear_form()
     for f in FIELDS:
-        if f["t"] != "calc" and f["v"] in rec["values"]:
+        if f["t"] not in ("calc", "auto") and f["v"] in rec["values"]:
             st.session_state[key(f["v"])] = rec["values"][f["v"]]
     st.session_state.editing = rec
 
@@ -110,7 +117,7 @@ def load_into_form(rec):
 def read_form():
     v = {}
     for f in FIELDS:
-        if f["t"] == "calc":
+        if f["t"] in ("calc", "auto"):
             continue
         val = st.session_state.get(key(f["v"]))
         if isinstance(val, str):
@@ -124,7 +131,9 @@ def read_form():
 def render_field(f, current):
     label = f["l"] + (f" ({f['u']})" if f["u"] and f["t"] == "number" else "")
     help_ = f["n"] or None
-    if f["t"] == "calc":
+    if f["t"] == "auto":
+        st.text_input(label + " · automatic", value=current.get(f["v"], ""), disabled=True, help=help_)
+    elif f["t"] == "calc":
         st.text_input(label + " · calculated", value=str(current.get(f["v"], "")), disabled=True,
                       help=help_)
     elif f["t"] == "choice":
@@ -153,7 +162,7 @@ records = load_records()
 
 st.title("PhilPEN Risk Records")
 st.caption("Encode the PhilPEN risk factors from each Annex 5 form. Records are anonymous: "
-           "use a patient code, never a name. Each saved form becomes one row in the CSV export.")
+           "each record gets an automatic patient code (P-0001, P-0002, ...). Each saved form becomes one row in the CSV export.")
 
 top = st.columns([2, 2, 2, 4])
 top[0].metric("Number of records", len(records))
@@ -199,6 +208,7 @@ with tab_form:
     ed = st.session_state.editing
     st.subheader(f"Editing {ed['values'].get('patient_code', '')}" if ed else "New record")
     current = read_form()
+    current["patient_code"] = ed["values"].get("patient_code") if ed else next_patient_code(records)
     for title, fields in section_fields().items():
         with st.container(border=True):
             st.markdown(f"**{title.split('. ', 1)[1]}**")
@@ -214,8 +224,10 @@ with tab_form:
 
     b1, b2, b3 = st.columns([2, 2, 6])
     if b1.button("Save record", type="primary", width="stretch"):
-        if not current.get("patient_code"):
-            st.error("Type a patient code before saving.")
+        if not ed:
+            current["patient_code"] = next_patient_code(load_records())
+        if len(current) <= 1:
+            st.error("Fill in the form before saving.")
         else:
             rec_id = ed["id"] if ed else uuid.uuid4().hex[:12]
             save_record(rec_id, current, ed["encoded_at"] if ed else None)
