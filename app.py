@@ -157,13 +157,14 @@ st.caption("Encode the PhilPEN risk factors from each Annex 5 form. Records are 
 
 top = st.columns([2, 2, 2, 4])
 top[0].metric("Number of records", len(records))
-if records:
-    cols = ["record_id", "encoded_at", "updated_at"] + [f["v"] for f in FIELDS]
-    df = pd.DataFrame([{"record_id": r["id"], "encoded_at": r["encoded_at"], "updated_at": r["updated_at"],
-                        **r["values"]} for r in records]).reindex(columns=cols)
-    top[1].download_button("Export CSV", df.to_csv(index=False).encode("utf-8-sig"),
-                           file_name=f"philpen_risk_records_{datetime.now():%Y-%m-%d}.csv",
-                           mime="text/csv", width="stretch")
+cols = ["record_id", "encoded_at", "updated_at"] + [f["v"] for f in FIELDS]
+df = pd.DataFrame([{"record_id": r["id"], "encoded_at": r["encoded_at"], "updated_at": r["updated_at"],
+                    **r["values"]} for r in records], columns=cols)
+csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
+csv_name = f"philpen_risk_records_{datetime.now():%Y-%m-%d}.csv"
+top[1].download_button("Export CSV", csv_bytes, file_name=csv_name, mime="text/csv", width="stretch",
+                       disabled=not records, help=None if records else "Save a record first",
+                       key="export_top")
 if top[2].button("New record", type="primary", width="stretch"):
     clear_form()
     st.rerun()
@@ -186,6 +187,8 @@ with tab_list:
             "Encoded": r["encoded_at"][:10],
         } for r in shown])
         st.dataframe(table, hide_index=True, width="stretch")
+        st.download_button(f"Export all {len(records)} records as CSV", csv_bytes, file_name=csv_name,
+                           mime="text/csv", key="export_list")
         labels = {r["id"]: f"{r['values'].get('patient_code', '(no code)')} · encoded {r['encoded_at'][:16]}" for r in shown}
         pick = st.selectbox("Open a record to edit", list(labels), format_func=labels.get, index=None)
         if pick and st.button("Open in form"):
