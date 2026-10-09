@@ -97,12 +97,14 @@ def derive(v):
 
 # ---------- form ----------
 def key(var):
-    return "f_" + var
+    # The form version is part of every widget key, so bumping it gives a brand-new blank form.
+    return f"f_{var}_{st.session_state.get('form_ver', 0)}"
 
 
 def clear_form():
     for f in FIELDS:
         st.session_state.pop(key(f["v"]), None)
+    st.session_state.form_ver = st.session_state.get("form_ver", 0) + 1
     st.session_state.editing = None
 
 
