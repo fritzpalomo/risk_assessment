@@ -17,6 +17,28 @@ st.set_page_config(page_title="PhilPEN Risk Records", page_icon="🩺", layout="
 
 
 # ---------- storage ----------
+# Records go to a Google Sheet when the app has Google credentials in its secrets
+# (permanent), otherwise to records.db next to app.py (erased on Streamlit Cloud restarts).
+SHEET_HEADER = ["id", "encoded_at", "updated_at", "data"]
+
+
+def use_sheets():
+    try:
+        return "gcp_service_account" in st.secrets and "sheet_url" in st.secrets
+    except Exception:
+        return False
+
+
+@st.cache_resource
+def get_sheet():
+    import gspread
+    gc = gspread.service_account_from_dict(dict(st.secrets["gcp_service_account"]))
+    ws = gc.open_by_url(st.secrets["sheet_url"]).sheet1
+    if ws.row_values(1) != SHEET_HEADER:
+        ws.update([SHEET_HEADER], "A1:D1")
+    return ws
+
+
 @st.cache_resource
 def get_conn():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -27,24 +49,60 @@ def get_conn():
 
 
 def load_records():
-    rows = get_conn().execute(
-        "SELECT id, encoded_at, updated_at, data FROM records ORDER BY updated_at DESC"
-    ).fetchall()
-    return [{"id": r[0], "encoded_at": r[1], "updated_at": r[2], "values": json.loads(r[3])} for r in rows]
+    if use_sheets():
+        rows = [(r["id"], r["encoded_at"], r["updated_at"], r["data"])
+                for r in get_sheet().get_all_records(expected_headers=SHEET_HEADER) if r.get("id")]
+    else:
+        rows = get_conn().execute("SELECT id, encoded_at, updated_at, data FROM records").fetchall()
+    recs = [{"id": str(r[0]), "encoded_at": str(r[1]), "updated_at": str(r[2]), "values": json.loads(r[3])} for r in rows]
+    return sorted(recs, key=lambda r: r["updated_at"], reverse=True)
 
 
-def save_record(rec_id, values, encoded_at):
+def save_record(rec_id, values, encoded_at, updated_at=None):
     now = datetime.now().isoformat(timespec="seconds")
-    get_conn().execute(
-        "INSERT OR REPLACE INTO records VALUES (?, ?, ?, ?)",
-        (rec_id, encoded_at or now, now, json.dumps(values)),
-    )
-    get_conn().commit()
+    row = [rec_id, encoded_at or now, updated_at or now, json.dumps(values)]
+    if use_sheets():
+        ws = get_sheet()
+        cell = ws.find(rec_id, in_column=1)
+        if cell:
+            ws.update([row], f"A{cell.row}:D{cell.row}")
+        else:
+            ws.append_row(row, value_input_option="RAW")
+    else:
+        get_conn().execute("INSERT OR REPLACE INTO records VALUES (?, ?, ?, ?)", row)
+        get_conn().commit()
 
 
 def delete_record(rec_id):
-    get_conn().execute("DELETE FROM records WHERE id = ?", (rec_id,))
-    get_conn().commit()
+    if use_sheets():
+        ws = get_sheet()
+        cell = ws.find(rec_id, in_column=1)
+        if cell:
+            ws.delete_rows(cell.row)
+    else:
+        get_conn().execute("DELETE FROM records WHERE id = ?", (rec_id,))
+        get_conn().commit()
+
+
+def import_csv(file, existing):
+    """Add records from an exported CSV; records whose id is already saved are skipped."""
+    df = pd.read_csv(file, dtype=str, keep_default_na=False)
+    known = {r["id"] for r in existing}
+    types = {f["v"]: f["t"] for f in FIELDS}
+    added = 0
+    for _, row in df.iterrows():
+        rec_id = row.get("record_id") or uuid.uuid4().hex[:12]
+        if rec_id in known:
+            continue
+        v = {}
+        for col, val in row.items():
+            if col in types and types[col] not in ("calc",) and val != "":
+                v[col] = float(val) if types[col] == "number" else val
+        v.update(derive(v))
+        save_record(rec_id, v, row.get("encoded_at") or None, row.get("updated_at") or None)
+        known.add(rec_id)
+        added += 1
+    return added
 
 
 def next_patient_code(records):
@@ -165,6 +223,9 @@ records = load_records()
 st.title("PhilPEN Risk Records")
 st.caption("Encode the PhilPEN risk factors from each Annex 5 form. Records are anonymous: "
            "each record gets an automatic patient code (P-0001, P-0002, ...). Each saved form becomes one row in the CSV export.")
+if not use_sheets():
+    st.warning("Records are saved on this server only. Streamlit Cloud erases them when the app restarts, "
+               "so export the CSV after each session, or connect a Google Sheet for permanent storage (see README).")
 
 top = st.columns([2, 2, 2, 4])
 top[0].metric("Number of records", len(records))
@@ -183,6 +244,14 @@ if top[2].button("New record", type="primary", width="stretch"):
 tab_form, tab_list = st.tabs(["Encode form", "Records"])
 
 with tab_list:
+    with st.expander("Import records from an exported CSV"):
+        up = st.file_uploader("CSV exported from this app", type="csv", key="import_csv")
+        if up is not None and st.button("Import records"):
+            n = import_csv(up, records)
+            st.session_state.import_msg = f"Imported {n} record(s). Records already saved were skipped."
+            st.rerun()
+        if st.session_state.get("import_msg"):
+            st.success(st.session_state.pop("import_msg"))
     if not records:
         st.info("No records yet. Use the Encode form tab to save the first one.")
     else:

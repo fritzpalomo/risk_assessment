@@ -22,6 +22,43 @@ The app opens at http://localhost:8501. Records are saved in `records.db` next t
 5. Click **Deploy**. You get a link like `https://<name>.streamlit.app`.
 6. Make it private: open the app's **Settings → Sharing** and allow only the email addresses you choose. Community Cloud allows one private app per account.
 
+## 3. Keep records permanently with Google Sheets (recommended)
+
+Streamlit Community Cloud erases `records.db` whenever the app restarts or sleeps. Connect a Google Sheet and every record is saved there instead.
+
+1. **Create the sheet.** In Google Sheets, create a blank spreadsheet named, for example, *PhilPEN Records*, and copy its URL.
+2. **Create a service account** (a robot Google account the app signs in with):
+   1. Open https://console.cloud.google.com, then create a project (any name).
+   2. Search for **Google Sheets API** and click **Enable**.
+   3. Go to **IAM & Admin → Service Accounts → Create service account**, give it a name, and click **Done**.
+   4. Open the new service account, go to **Keys → Add key → Create new key → JSON**. A `.json` file downloads.
+3. **Share the sheet** with the service account's email (it looks like `name@project.iam.gserviceaccount.com`) as **Editor**.
+4. **Add the secrets in Streamlit.** On share.streamlit.io, open your app's **⋮ → Settings → Secrets** and paste the following, filling in the values from the `.json` file:
+
+```toml
+sheet_url = "https://docs.google.com/spreadsheets/d/..."
+
+[gcp_service_account]
+type = "service_account"
+project_id = "..."
+private_key_id = "..."
+private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+client_email = "...@....iam.gserviceaccount.com"
+client_id = "..."
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "..."
+```
+
+5. Save. The app restarts, and the yellow "saved on this server only" warning disappears. Each record becomes one row in the sheet.
+
+Never upload the `.json` key file to GitHub.
+
+## Restoring records
+
+On the **Records** tab, open **Import records from an exported CSV** and upload any CSV you exported from this app. Records that are already saved are skipped, so importing the same file twice is safe.
+
 ## Important: saved records on Streamlit Cloud
 
 Streamlit Community Cloud does not keep files permanently. `records.db` is erased whenever the app restarts, goes to sleep after a few days without visitors, or is redeployed. To stay safe:
